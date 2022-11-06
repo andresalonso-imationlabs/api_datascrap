@@ -1,0 +1,49 @@
+name: deploy
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT }}
+  SERVICE: apidatascrap
+  REGION: europe-west1
+  DOMAIN: apidatascrap.imationlabs.com
+
+on: [push, pull_request]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Add "id-token" with the intended permissions.
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+      
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    # Authentication via credentials json
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v0'
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+    # Setup gcloud CLI
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v0
+
+    - name: Authorize Docker push
+      run: gcloud auth configure-docker
+
+    - name: Build and Push Container
+      run: |-
+        docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{  github.sha }} .
+        docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{  github.sha }}
+    - name: Deploy to Cloud Run
+      # Update to 4Gi minimum if serving model inplace, get back to 1024Mi or less if using vertexAI serving
+      # TODO: Add --allow-unauthenticated to make the service public
+      # gcloud components install beta && gcloud beta run domain-mappings create --service ${{ env.SERVICE }} --domain env.DOMAIN
+      run: |-
+        gcloud run deploy ${{ env.SERVICE }} --memory=1024Mi --region=${{ env.REGION }} --image=gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{  github.sha }} --platform="managed" --allow-unauthenticated --quiet
+        gcloud run services add-iam-policy-binding ${{ env.SERVICE }} --member="allUsers" --role="roles/run.invoker" --region=${{ env.REGION }}
+
