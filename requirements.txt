@@ -1,2 +1,5 @@
 fastapi
 uvicorn
+lxml
+requests
+json
